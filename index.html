@@ -1,0 +1,571 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Hymnus Strategiespiel Ressourcen Counter</title>
+  <style>
+    :root{
+      --card-bg:#f7f9fc;
+      --accent:#2b7cff;
+      --accent-2:#00b4ff;
+      --good:#00a86b;
+      --warn:#ff9f1c;
+      --muted:#6b7280;
+      font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial;
+    }
+
+    /* Layout */
+    body{
+      margin:0;
+      padding:24px;
+      background:linear-gradient(180deg,#eef4ff,white);
+      color:#0f172a;
+    }
+    h1{ margin:0 0 12px 0; font-size:20px; }
+    .topbar{
+      display:flex;
+      gap:12px;
+      align-items:center;
+      margin-bottom:18px;
+      flex-wrap:wrap;
+    }
+    .controls { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+
+    /* Buttons */
+    button{
+      background:var(--accent);
+      color:white;
+      border:0;
+      padding:8px 12px;
+      border-radius:6px;
+      cursor:pointer;
+      font-weight:600;
+    }
+    button.ghost{
+      background:transparent;
+      color:var(--accent);
+      border:1px solid rgba(43,124,255,0.15);
+      font-weight:600;
+    }
+    button.small{
+      padding:6px 8px;
+      font-size:13px;
+    }
+    button.disabled{ opacity:0.6; pointer-events:none; }
+
+    .muted{ color:var(--muted); font-size:13px; margin-left:8px; }
+
+    /* Grid / Cards */
+    .grid{
+      display:grid;
+      grid-template-columns:repeat(3,1fr);
+      gap:12px;
+      max-width:980px;
+    }
+    .card{
+      background:var(--card-bg);
+      padding:14px;
+      border-radius:10px;
+      box-shadow:0 2px 6px rgba(12,18,30,0.04);
+      display:flex;
+      flex-direction:column;
+      gap:10px;
+      align-items:flex-start;
+    }
+    .card-header{
+      display:flex;
+      width:100%;
+      justify-content:space-between;
+      align-items:center;
+    }
+    .team-name{ font-weight:700; }
+    .resources{ font-size:24px; font-weight:800; color:#0b1220; }
+
+    .small{ font-size:13px; color:var(--muted); }
+    .clear-btn{ background:#fff; color:var(--accent); border:1px solid rgba(43,124,255,0.12); padding:6px 8px; border-radius:8px; cursor:pointer; }
+    .upgrade-btn{ padding:6px 8px; border-radius:8px; border:0; cursor:pointer; font-weight:700; }
+    .upgrade-rate{ background:var(--good); color:white; }
+    .upgrade-storage{ background:var(--warn); color:white; }
+
+    .progress{
+      width:100%;
+      height:8px;
+      background:rgba(0,0,0,0.06);
+      border-radius:6px;
+      overflow:hidden;
+    }
+    .progress > i{
+      display:block;
+      height:100%;
+      background:linear-gradient(90deg,var(--accent),var(--accent-2));
+    }
+
+    .footer-note{ margin-top:14px; color:var(--muted); font-size:13px; max-width:980px; }
+
+    @media (max-width:720px){
+      .grid{ grid-template-columns:repeat(1,1fr); }
+    }
+
+    /* Modal */
+    .modal-backdrop{
+      position:fixed;
+      inset:0;
+      background:rgba(0,0,0,0.35);
+      display:none;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+      z-index:80;
+    }
+    .modal-backdrop.visible{ display:flex; }
+    .modal{
+      background:white;
+      border-radius:10px;
+      max-width:900px;
+      width:100%;
+      padding:16px;
+      box-shadow:0 8px 30px rgba(2,6,23,0.2);
+      max-height:85vh;
+      overflow:auto;
+    }
+    .modal h2{ margin:0 0 8px 0;font-size:18px; }
+    .modal table{ width:100%; border-collapse:collapse; margin-top:8px; }
+    .modal th, .modal td{ text-align:left; padding:8px; border-bottom:1px solid #f0f3f7; font-size:14px; }
+    .modal .close{ float:right; background:transparent; color:var(--muted); border:0; font-size:16px; cursor:pointer; }
+    .checkbox-cell input{ transform:scale(1.05); cursor:pointer; }
+  </style>
+</head>
+<body>
+  <h1>Hymnus Strategiespiel Ressourcen Counter</h1>
+
+  <div class="topbar">
+    <div class="controls">
+      <button id="clearAllBtn">Clear All</button>
+      <button id="resumeBtn" class="ghost">Resume</button>
+      <label style="display:inline-flex;align-items:center;gap:8px;">
+        <input type="checkbox" id="testMode" /> Test mode (5s)
+      </label>
+      <button id="resetStorage" class="ghost">Reset storage</button>
+    </div>
+
+    <div class="muted" id="countdownLabel">Next update in: --</div>
+  </div>
+
+  <div class="grid" id="teamsGrid" aria-live="polite"></div>
+
+  <div class="footer-note">
+    Default rate: 1 resource/minute. Rate upgrade → 2/min (free). Storage upgrade → capacity 20 (free). Counts and upgrades persist in localStorage.
+  </div>
+
+  <!-- Modal: Resume / Stats -->
+  <div id="modalBackdrop" class="modal-backdrop" role="dialog" aria-modal="true" aria-hidden="true">
+    <div class="modal" role="document">
+      <button id="closeModalBtn" class="close" title="Close">✕</button>
+      <h2>Team Statistics</h2>
+      <div class="small muted">Resources earned = total amount successfully added to storage (overflow prevented).</div>
+      <table id="statsTable" aria-live="polite">
+        <thead>
+          <tr>
+            <th>Team</th>
+            <th>Current stored</th>
+            <th>Total earned</th>
+            <th class="checkbox-cell">Rate upgraded</th>
+            <th class="checkbox-cell">Storage upgraded</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    (function () {
+      // Config
+      const NUM_TEAMS = 9;
+      const BASE_RATE = 1;          // resources per minute
+      const UPGRADED_RATE = 2;      // upgraded rate
+      const BASE_STORAGE = 10;
+      const UPGRADED_STORAGE = 20;
+      const STORAGE_KEY = 'hymnus-resources-v-final';
+      const SETTINGS_KEY = 'hymnus-resources-settings-v-final';
+      const REAL_MIN_MS = 60000;
+      const TEST_MIN_MS = 5000;
+
+      // DOM
+      const teamsGrid = document.getElementById('teamsGrid');
+      const clearAllBtn = document.getElementById('clearAllBtn');
+      const resumeBtn = document.getElementById('resumeBtn');
+      const testModeEl = document.getElementById('testMode');
+      const resetStorageBtn = document.getElementById('resetStorage');
+      const countdownLabel = document.getElementById('countdownLabel');
+
+      const modalBackdrop = document.getElementById('modalBackdrop');
+      const closeModalBtn = document.getElementById('closeModalBtn');
+      const statsTableBody = document.querySelector('#statsTable tbody');
+
+      // State
+      // counts: internal floats for smooth accumulation
+      // totalEarned: sum of actually added amounts (floats)
+      // rateOwned/storageOwned: booleans per team
+      let state = loadState();
+      ensureStateShape();
+
+      // Build UI
+      function buildCards() {
+        teamsGrid.innerHTML = '';
+        for (let i = 0; i < NUM_TEAMS; i++) {
+          const card = document.createElement('section');
+          card.className = 'card';
+          card.setAttribute('data-team', i);
+          card.innerHTML = `
+            <div class="card-header">
+              <div class="team-name">Team ${i + 1}</div>
+              <div class="resources" id="res-${i}">0</div>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;">
+              <div>
+                <div class="small">Resource: resource</div>
+                <div class="small" id="rate-${i}">Rate: ${BASE_RATE}/min</div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+                <button class="clear-btn" id="clear-${i}">Clear</button>
+                <div style="display:flex;gap:6px;">
+                  <button class="upgrade-btn upgrade-rate" id="rate-btn-${i}">Upgrade Rate (free)</button>
+                  <button class="upgrade-btn upgrade-storage" id="stor-btn-${i}">Upgrade Storage (free)</button>
+                </div>
+              </div>
+            </div>
+
+            <div style="width:100%;margin-top:8px;">
+              <div class="small">Storage: <span id="storage-${i}">${BASE_STORAGE}</span></div>
+              <div class="progress" aria-hidden="true">
+                <i id="progress-${i}" style="width:0%"></i>
+              </div>
+            </div>
+          `;
+          teamsGrid.appendChild(card);
+        }
+
+        // Attach listeners (explicit, per-button)
+        for (let i = 0; i < NUM_TEAMS; i++) {
+          const clearBtn = document.getElementById(`clear-${i}`);
+          const rateBtn = document.getElementById(`rate-btn-${i}`);
+          const storBtn = document.getElementById(`stor-btn-${i}`);
+
+          clearBtn.addEventListener('click', () => {
+            if (!confirm(`Clear resources for Team ${i + 1}?`)) return;
+            state.counts[i] = 0;
+            saveState();
+            render();
+          });
+
+          rateBtn.addEventListener('click', () => {
+            if (state.rateOwned[i]) return;
+            state.rateOwned[i] = true;
+            saveState();
+            render();
+          });
+
+          storBtn.addEventListener('click', () => {
+            if (state.storageOwned[i]) return;
+            state.storageOwned[i] = true;
+            saveState();
+            render();
+          });
+        }
+      }
+
+      // Render
+      function render() {
+        for (let i = 0; i < NUM_TEAMS; i++) {
+          const resEl = document.getElementById(`res-${i}`);
+          const rateEl = document.getElementById(`rate-${i}`);
+          const storageEl = document.getElementById(`storage-${i}`);
+          const progressEl = document.getElementById(`progress-${i}`);
+
+          if (resEl) resEl.textContent = String(Math.floor(state.counts[i]));
+          if (rateEl) rateEl.textContent = `Rate: ${teamRate(i)}/min`;
+          if (storageEl) storageEl.textContent = String(teamStorage(i));
+          if (progressEl) {
+            const pct = Math.min(100, (state.counts[i] / teamStorage(i)) * 100);
+            progressEl.style.width = pct + '%';
+          }
+
+          // update upgrade buttons
+          const rateBtn = document.getElementById(`rate-btn-${i}`);
+          const storBtn = document.getElementById(`stor-btn-${i}`);
+          if (rateBtn) {
+            if (state.rateOwned[i]) {
+              rateBtn.textContent = 'Rate Upgraded';
+              rateBtn.classList.add('disabled');
+              rateBtn.disabled = true;
+            } else {
+              rateBtn.textContent = 'Upgrade Rate (free)';
+              rateBtn.classList.remove('disabled');
+              rateBtn.disabled = false;
+            }
+          }
+          if (storBtn) {
+            if (state.storageOwned[i]) {
+              storBtn.textContent = 'Storage Upgraded';
+              storBtn.classList.add('disabled');
+              storBtn.disabled = true;
+            } else {
+              storBtn.textContent = 'Upgrade Storage (free)';
+              storBtn.classList.remove('disabled');
+              storBtn.disabled = false;
+            }
+          }
+        }
+      }
+
+      // Helpers
+      function teamRate(i) { return state.rateOwned[i] ? UPGRADED_RATE : BASE_RATE; }
+      function teamStorage(i) { return state.storageOwned[i] ? UPGRADED_STORAGE : BASE_STORAGE; }
+
+      // Modal (resume)
+      function openModal() {
+        populateStatsTable();
+        modalBackdrop.classList.add('visible');
+        modalBackdrop.setAttribute('aria-hidden', 'false');
+      }
+      function closeModal() {
+        modalBackdrop.classList.remove('visible');
+        modalBackdrop.setAttribute('aria-hidden', 'true');
+      }
+      function populateStatsTable() {
+        statsTableBody.innerHTML = '';
+        for (let i = 0; i < NUM_TEAMS; i++) {
+          const tr = document.createElement('tr');
+
+          const currentStored = Math.floor(state.counts[i]);
+          const totalEarned = Math.floor(state.totalEarned[i]);
+
+          const rateChk = document.createElement('input');
+          rateChk.type = 'checkbox';
+          rateChk.checked = !!state.rateOwned[i];
+          rateChk.dataset.team = i;
+          rateChk.dataset.kind = 'rate';
+          rateChk.className = 'upgrade-checkbox';
+          rateChk.addEventListener('change', onUpgradeCheckboxChange);
+
+          const storChk = document.createElement('input');
+          storChk.type = 'checkbox';
+          storChk.checked = !!state.storageOwned[i];
+          storChk.dataset.team = i;
+          storChk.dataset.kind = 'storage';
+          storChk.className = 'upgrade-checkbox';
+          storChk.addEventListener('change', onUpgradeCheckboxChange);
+
+          tr.innerHTML = `
+            <td>Team ${i + 1}</td>
+            <td>${currentStored}</td>
+            <td>${totalEarned}</td>
+            <td class="checkbox-cell"></td>
+            <td class="checkbox-cell"></td>
+          `;
+          tr.children[3].appendChild(rateChk);
+          tr.children[4].appendChild(storChk);
+          statsTableBody.appendChild(tr);
+        }
+      }
+      function onUpgradeCheckboxChange(ev) {
+        const chk = ev.target;
+        const team = Number(chk.dataset.team);
+        const kind = chk.dataset.kind;
+        const checked = !!chk.checked;
+
+        if (!Number.isInteger(team) || team < 0 || team >= NUM_TEAMS) return;
+
+        if (!checked) {
+          const ok = confirm(`Remove ${kind === 'rate' ? 'Rate' : 'Storage'} upgrade for Team ${team + 1}?`);
+          if (!ok) {
+            chk.checked = true;
+            return;
+          }
+        }
+
+        if (kind === 'rate') {
+          state.rateOwned[team] = checked;
+        } else if (kind === 'storage') {
+          state.storageOwned[team] = checked;
+          // clamp stored if storage reduced
+          const max = teamStorage(team);
+          if (state.counts[team] > max) {
+            state.counts[team] = max;
+          }
+        }
+
+        saveState();
+        // refresh both modal and main UI
+        populateStatsTable();
+        render();
+      }
+
+      // Persistence
+      function loadState() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return defaultState();
+          const parsed = JSON.parse(raw);
+          if (!parsed) return defaultState();
+
+          const counts = Array.isArray(parsed.counts) && parsed.counts.length === NUM_TEAMS
+            ? parsed.counts.map(n => typeof n === 'number' ? n : 0)
+            : Array(NUM_TEAMS).fill(0);
+
+          const rateOwned = Array.isArray(parsed.rateOwned) && parsed.rateOwned.length === NUM_TEAMS
+            ? parsed.rateOwned.map(Boolean)
+            : Array(NUM_TEAMS).fill(false);
+
+          const storageOwned = Array.isArray(parsed.storageOwned) && parsed.storageOwned.length === NUM_TEAMS
+            ? parsed.storageOwned.map(Boolean)
+            : Array(NUM_TEAMS).fill(false);
+
+          const totalEarned = Array.isArray(parsed.totalEarned) && parsed.totalEarned.length === NUM_TEAMS
+            ? parsed.totalEarned.map(n => typeof n === 'number' ? n : 0)
+            : Array(NUM_TEAMS).fill(0);
+
+          return {
+            counts,
+            rateOwned,
+            storageOwned,
+            totalEarned,
+            lastTs: typeof parsed.lastTs === 'number' ? parsed.lastTs : Date.now()
+          };
+        } catch (e) {
+          return defaultState();
+        }
+      }
+      function saveState() {
+        try {
+          state.lastTs = Date.now();
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        } catch (e) {
+          console.warn('Could not save state', e);
+        }
+      }
+      function defaultState() {
+        return {
+          counts: Array(NUM_TEAMS).fill(0),
+          rateOwned: Array(NUM_TEAMS).fill(false),
+          storageOwned: Array(NUM_TEAMS).fill(false),
+          totalEarned: Array(NUM_TEAMS).fill(0),
+          lastTs: Date.now()
+        };
+      }
+      function ensureStateShape() {
+        if (!state || !Array.isArray(state.counts) || state.counts.length !== NUM_TEAMS) state.counts = Array(NUM_TEAMS).fill(0);
+        if (!Array.isArray(state.rateOwned) || state.rateOwned.length !== NUM_TEAMS) state.rateOwned = Array(NUM_TEAMS).fill(false);
+        if (!Array.isArray(state.storageOwned) || state.storageOwned.length !== NUM_TEAMS) state.storageOwned = Array(NUM_TEAMS).fill(false);
+        if (!Array.isArray(state.totalEarned) || state.totalEarned.length !== NUM_TEAMS) state.totalEarned = Array(NUM_TEAMS).fill(0);
+        if (typeof state.lastTs !== 'number') state.lastTs = Date.now();
+      }
+
+      // Controls wiring
+      clearAllBtn.addEventListener('click', () => {
+        if (!confirm('Clear resources for ALL teams?')) return;
+        for (let i = 0; i < NUM_TEAMS; i++) state.counts[i] = 0;
+        saveState();
+        render();
+      });
+
+      resumeBtn.addEventListener('click', openModal);
+      closeModalBtn.addEventListener('click', closeModal);
+      modalBackdrop.addEventListener('click', (ev) => { if (ev.target === modalBackdrop) closeModal(); });
+
+      resetStorageBtn.addEventListener('click', () => {
+        if (!confirm('Reset all stored data? This will clear counts, upgrades and totals.')) return;
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.removeItem(SETTINGS_KEY);
+        state = defaultState();
+        ensureStateShape();
+        buildCards();
+        render();
+        saveState();
+      });
+
+      testModeEl.addEventListener('change', () => {
+        saveSettings();
+        // restart loop with new timing
+        stopLoop();
+        startLoop();
+      });
+
+      function loadSettings() {
+        try {
+          const raw = localStorage.getItem(SETTINGS_KEY);
+          if (!raw) return { testMode: false };
+          return JSON.parse(raw);
+        } catch (e) {
+          return { testMode: false };
+        }
+      }
+      function saveSettings() {
+        try {
+          localStorage.setItem(SETTINGS_KEY, JSON.stringify({ testMode: testModeEl.checked }));
+        } catch (e) {}
+      }
+
+      // Accumulation loop
+      let loopTimer = null;
+      function startLoop() {
+        stopLoop();
+        const settings = loadSettings();
+        testModeEl.checked = !!settings.testMode;
+        const minuteMs = testModeEl.checked ? TEST_MIN_MS : REAL_MIN_MS;
+        let last = Date.now();
+        loopTimer = setInterval(() => {
+          const now = Date.now();
+          const dt = now - last;
+          last = now;
+          if (dt <= 0) return;
+          let changed = false;
+          for (let i = 0; i < NUM_TEAMS; i++) {
+            const ratePerMs = teamRate(i) / minuteMs; // resources per ms
+            const add = ratePerMs * dt;
+            if (add <= 0) continue;
+            const max = teamStorage(i);
+            if (state.counts[i] < max) {
+              const allowed = Math.min(add, max - state.counts[i]);
+              if (allowed > 0) {
+                state.counts[i] += allowed;
+                state.totalEarned[i] += allowed;
+                changed = true;
+              }
+            }
+          }
+          if (changed) {
+            saveState();
+            render();
+          }
+          const nextInMs = minuteMs - (now % minuteMs);
+          countdownLabel.textContent = `Next update in: ${Math.ceil(nextInMs / 1000)}s`;
+        }, 200);
+      }
+      function stopLoop() {
+        if (loopTimer) { clearInterval(loopTimer); loopTimer = null; }
+      }
+
+      // Init
+      (function init() {
+        // ensure we have a valid state
+        ensureStateShape();
+        buildCards();
+        render();
+        // read saved settings and start
+        const settings = loadSettings();
+        testModeEl.checked = !!settings.testMode;
+        startLoop();
+
+        // save periodically and on unload
+        setInterval(saveState, 5000);
+        window.addEventListener('beforeunload', () => { saveState(); saveSettings(); stopLoop(); });
+      })();
+
+    })();
+  </script>
+</body>
+</html>
