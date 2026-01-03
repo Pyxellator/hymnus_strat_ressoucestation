@@ -1,4 +1,4 @@
-To run the application, just copy the code and put it inti something like VStudio Code od IntelliJ. The run it as Python file.
-If something isn´t working just open an Issue or an Pull request.
+My Personal Idea to improve the Strategiespiel. Every device can now run a Ressource Station. Just open the HTML File and then you can use it. 
 
 
+Not Official Tool
